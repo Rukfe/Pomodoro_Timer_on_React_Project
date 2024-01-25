@@ -1,87 +1,111 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './App.css';
+import CircleProgress from './CircleProgress'; // Импортируем наш SVG компонент
+
 
 function App() {
-  const [workMinutes, setWorkMinutes] = useState(50); // Время работы в минутах
-  const [breakMinutes, setBreakMinutes] = useState(10); // Время отдыха в минутах
-  const [workSeconds, setWorkSeconds] = useState(0); // Время работы в секундах
-  const [breakSeconds, setBreakSeconds] = useState(0); // Время отдыха в секундах
+  const [workMinutes, setWorkMinutes] = useState(0); // Время работы в минутах
+  const [breakMinutes, setBreakMinutes] = useState(0); // Время отдыха в минутах
+  const [workSeconds, setWorkSeconds] = useState(5); // Время работы в секундах
+  const [breakSeconds, setBreakSeconds] = useState(5); // Время отдыха в секундах
   const [isRunning, setIsRunning] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [timerType, setTimerType] = useState('work'); // 'work' или 'break'
   const [inputError, setInputError] = useState(''); // Новое состояние для отслеживания ошибок ввода
-
+  const [timerFinished, setTimerFinished] = useState(false);
   // Вычисляем totalTime на основе минут и секунд
   const workTime = workMinutes * 60 + workSeconds;
   const breakTime = breakMinutes * 60 + breakSeconds;
 
+  const notifyEndOfTime = useCallback(() => {
+    if (Notification.permission === "granted") {
+      const message = timerType === 'work' ? 'Время отдохнуть!' : 'Время поработать!';
+      new Notification(message);
+    }
+  }, [timerType]);
+  
   useEffect(() => {
-    let interval = null;
-
-    if (isRunning && elapsedSeconds < (timerType === 'work' ? workTime : breakTime)) {
-      interval = setInterval(() => {
-        setElapsedSeconds((elapsed) => elapsed + 1);
-      }, 1000);
-    } else if (!isRunning && elapsedSeconds !== 0) {
-      clearInterval(interval);
-    } else if (elapsedSeconds >= (timerType === 'work' ? workTime : breakTime)) {
-      setTimerType((prevType) => (prevType === 'work' ? 'break' : 'work'));
-      setElapsedSeconds(0);
-      if (Notification.permission === "granted") {
-        new Notification(timerType === 'work' ? 'Время отдыха!' : 'Время работать!');
-      }
-    }
-
+    if (!isRunning) return undefined;
+  
+    const totalSeconds = timerType === 'work' ? workTime : breakTime;
+    const interval = setInterval(() => {
+      setElapsedSeconds((elapsed) => {
+        if (elapsed < totalSeconds) {
+          return elapsed + 1;
+        }
+        clearInterval(interval);
+        setTimerFinished(true);
+        return elapsed;
+      });
+    }, 1000);
+  
     return () => clearInterval(interval);
-  }, [isRunning, elapsedSeconds, workTime, breakTime, timerType]);
-
-  const handleStartStopClick = () => {
-    // Прежде чем начать отсчет, проверяем валидность значений
-    if ((workMinutes === 0 && workSeconds === 0) || (breakMinutes === 0 && breakSeconds === 0)) {
-      setInputError('Введите корректное время');
-      return;
+  }, [isRunning, timerType, workTime, breakTime]);
+  
+  useEffect(() => {
+    if (timerFinished) {
+      notifyEndOfTime();
+      setTimerType(prevType => prevType === 'work' ? 'break' : 'work');
+      setElapsedSeconds(0);
+      setTimerFinished(false);
     }
-
-    // Если все хорошо, сбрасываем ошибку и начинаем/останавливаем отсчет
-    setInputError('');
-    setIsRunning(!isRunning);
+  }, [notifyEndOfTime, timerFinished]);
+  
+  const handleStartStopClick = () => {
+    const hasValidTime = (minutes, seconds) => minutes > 0 || seconds > 0;
+  
+    if (isRunning) {
+      setIsRunning(false); // Остановить сразу при нажатии, если таймер работает.
+      // Не нужно проверять время, потому что таймер уже запущен.
+    } else {
+      // Запустить таймер только если время валидно.
+      if (!hasValidTime(workMinutes, workSeconds) || !hasValidTime(breakMinutes, breakSeconds)) {
+        setInputError('Введите корректное время');
+        setTimeout(() => setInputError(''), 2000);
+        return;
+      }
+  
+      setInputError('');
+      setIsRunning(true);
+    }
   };
-
+  
   const handleResetClick = () => {
-    // Сбрасываем ошибку при нажатии кнопки сброса
     setInputError('');
     setElapsedSeconds(0);
+    setTimerFinished(false);
     setIsRunning(false);
   };
   
-
   const formatTime = (totalSeconds) => {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
-    return `${minutes < 10 ? '0' : ''}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+    const formattedTime = `${minutes < 10 ? '0' : ''}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+    // Вызов calculateProgress для демонстрации прогресса (если это необходимо)
+    const progressPercentage = calculateProgress();
+    // Вероятно, здесь следует что-то сделать с progressPercentage
+    return formattedTime;
   };
-
+  
   const calculateProgress = () => {
     const totalTime = timerType === 'work' ? workTime : breakTime;
-    return elapsedSeconds / totalTime * 100;
+    const progress = (elapsedSeconds / totalTime) * 100;
+    return Math.min(progress, 100);
   };
-
-  const progressBarStyle = {
-    background: `conic-gradient(${timerType === 'work' ? 'red' : 'green'} ${calculateProgress()}%, lightgray ${calculateProgress()}% 100%)`,
-  };
-
-
+  
 
   return (
     <div className="App">
       <h1>Таймер Помодоро</h1>
       <h2>{timerType === 'work' ? 'Время поработать!' : 'Время отдохнуть!'}</h2>
-      <div className="timer" style={progressBarStyle}>
-        {formatTime(timerType === 'work' ? workTime - elapsedSeconds : breakTime - elapsedSeconds)}
-      </div>
+      <CircleProgress percentage={calculateProgress()}>
+        <div className="timer-text">
+          {formatTime(timerType === 'work' ? workTime - elapsedSeconds : breakTime - elapsedSeconds)}
+        </div>
+      </CircleProgress>
       <div>
         <label>
-          Работа: 
+          Работа:
           <input
             type="number"
             disabled={isRunning}
@@ -120,7 +144,7 @@ function App() {
         onClick={handleStartStopClick}
         className={inputError ? 'shake' : ''}
       >
-        {isRunning ? 'Остановить' : 'Начать'}
+        {isRunning ? 'Пауза' : 'Начать'}
       </button>
       <button onClick={handleResetClick}>Сбросить</button>
     </div>
